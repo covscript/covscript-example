@@ -1,17 +1,10 @@
 import netutils
-var count = 0
-var ts = runtime.time()
 loop
-    var num = to_string(math.randint(0, 100000))
-    var response = netutils.http_post("http://127.0.0.1:8080/test", num)
-    if response != num
+    var data = to_string(math.randint(1000000000, 9999999999))
+    system.out.println(data)
+    var response = netutils.http_post("http://127.0.0.1:8080/test", data)
+    if response != data
         system.out.println("ERROR: " + response)
-    else
-        ++count
     end
-    if runtime.time() - ts >= 1000
-        system.out.println(count)
-        ts = runtime.time()
-        count = 0
-    end
+    runtime.delay(100)
 end

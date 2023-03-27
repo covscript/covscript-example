@@ -103,7 +103,6 @@ end
 
 struct worker_type
     var co = null
-    var state = 0
     var server = null
 end
 
@@ -114,67 +113,76 @@ function wait_sock(sock, size)
 end
 
 function worker_main(self)
-    constant buffer_size = 128
-    var sock = new tcp.socket
-    ++self->state
-    context.await_s(sock.accept, {self->server->ac})
-    self->server->ac_lock = false
-    var header = new array
-    var buffer = new string
+    constant buffer_size = 256
     loop
-        wait_sock(sock, 1)
-        var str = sock.receive(buffer_size)
-        var skip_cntl_n = false
-        var end_of_header = 0
-        foreach ch in str
-            if end_of_header == 2
-                buffer += ch
-                continue
-            end
-            if skip_cntl_n
-                if ch == '\n'
-                    skip_cntl_n = false
-                    header.push_back(buffer)
-                    buffer = new string
-                    ++end_of_header 
-                else
-                    log("Data transmission error: expected \\n after \\r.")
-                    ++self->state
-                    return
+        # Accept new connection
+        while self->server->ac_lock
+            context.yield()
+        end
+        self->server->ac_lock = true
+        var sock = new tcp.socket
+        context.await_s(sock.accept, {self->server->ac})
+        self->server->ac_lock = false
+        context.yield()
+        # Process request
+        var header = new array
+        var buffer = new string
+        loop
+            wait_sock(sock, 1)
+            var str = sock.receive(buffer_size)
+            var skip_cntl_n = false
+            var end_of_header = 0
+            foreach ch in str
+                if end_of_header == 2
+                    buffer += ch
+                    continue
                 end
-                continue
+                if skip_cntl_n
+                    skip_cntl_n = false
+                    if ch == '\n'
+                        header.push_back(buffer)
+                        buffer = new string
+                        ++end_of_header
+                        continue
+                    end
+                    log("Data transmission error: expected \\n after \\r.")
+                end
+                if ch == '\r'
+                    skip_cntl_n = true
+                    continue
+                end
+                end_of_header = 0
+                buffer += ch
             end
-            if ch == '\r'
-                skip_cntl_n = true
-                continue
+        until end_of_header == 2
+        # Construct session
+        var session = new http_session{sock, header}
+        log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
+        # Receive POST data
+        var data = null
+        if session.method == "POST"
+            data = buffer
+            if session.content_length > buffer.size
+                var last_length = session.content_length - buffer.size
+                while last_length > buffer_size
+                    wait_sock(sock, buffer_size)
+                    data += sock.receive(buffer_size)
+                    last_length -= buffer_size
+                end
+                wait_sock(sock, last_length)
+                data += sock.receive(last_length)
             end
-            end_of_header = 0
-            buffer += ch
         end
-    until end_of_header == 2
-    var session = new http_session{sock, header}
-    log("Received: Method = " + session.method + ", URL = " + session.url + ", Host = " + session.host)
-    var data = null
-    if session.method == "POST"
-        data = buffer
-        if session.content_length > buffer.size
-            var last_length = session.content_length - buffer.size
-            while last_length > buffer_size
-                wait_sock(sock, buffer_size)
-                data += sock.receive(buffer_size)
-                last_length -= buffer_size
-            end
-            wait_sock(sock, last_length)
-            data += sock.receive(last_length)
+        # Calling function
+        link url_map = self->server->url_map
+        if url_map.exist(session.url)
+            url_map[session.url](session, data)
+        else
+            url_map["404"](session, data)
         end
+        sock.close()
+        context.yield()
     end
-    link url_map = self->server->url_map
-    if url_map.exist(session.url)
-        url_map[session.url](session, data)
-    else
-        url_map["404"](session, data)
-    end
-    ++self->state
 end
 
 function read_file(path)
@@ -193,7 +201,7 @@ end
 
 # Public Interfaces
 
-var proxy = null, timeout_ms = 3000, low_speed_limit = 100
+var proxy = null, timeout_ms = null, low_speed_limit = null
 
 function http_get(url)
     var buff = new iostream.char_buff
@@ -205,10 +213,14 @@ function http_get(url)
     end
     session.set_ssl_verify_host(false)
     session.set_ssl_verify_peer(false)
-    session.set_connect_timeout_ms(timeout_ms)
-    session.set_accept_timeout_ms(timeout_ms)
-    session.set_low_speed_limit(low_speed_limit)
-    session.set_low_speed_time(timeout_ms)
+    if timeout_ms != null
+        session.set_connect_timeout_ms(timeout_ms)
+        session.set_accept_timeout_ms(timeout_ms)
+        session.set_low_speed_time(timeout_ms)
+    end
+    if low_speed_limit != null
+        session.set_low_speed_limit(low_speed_limit)
+    end
     if session.perform()
         return buff.get_string()
     else
@@ -228,10 +240,14 @@ function http_post(url, post_fields)
     session.set_http_post_fields(post_fields)
     session.set_ssl_verify_host(false)
     session.set_ssl_verify_peer(false)
-    session.set_connect_timeout_ms(timeout_ms)
-    session.set_accept_timeout_ms(timeout_ms)
-    session.set_low_speed_limit(low_speed_limit)
-    session.set_low_speed_time(timeout_ms)
+    if timeout_ms != null
+        session.set_connect_timeout_ms(timeout_ms)
+        session.set_accept_timeout_ms(timeout_ms)
+        session.set_low_speed_time(timeout_ms)
+    end
+    if low_speed_limit != null
+        session.set_low_speed_limit(low_speed_limit)
+    end
     if session.perform()
         return buff.get_string()
     else
@@ -242,33 +258,14 @@ end
 class http_server
     var ac = null
     var ac_lock = false
-    var page_404 = null
     var url_map = new hash_map
-    var worker_list = new list
+    var worker_list = new array
+    var worker_count = 10
     function initialize()
         url_map.insert("404", [](session, post_data){
             var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
             session.send_response(state_codes.code_404, response_data, "text/html")
         })
-    end
-    function lock_acceptor()
-        ac_lock = true
-    end
-    function unlock_acceptor()
-        ac_lock = false
-        context.yield()
-    end
-    function collect_garbage()
-        var it = worker_list.begin
-        while it != worker_list.end
-            link worker = it.data
-            if worker->state == 2
-                context.destroy_co(worker->co)
-                it = worker_list.erase(it)
-            else
-                it.next()
-            end
-        end
     end
     function bind_page(url, path, state_code)
         var response_data = read_file(path)
@@ -283,23 +280,17 @@ class http_server
         ac = tcp.acceptor(tcp.endpoint_v4(port))
     end
     function run()
+        # Init workers
+        foreach it in range(worker_count)
+            var worker = gcnew worker_type
+            worker->server = &this
+            worker->co = context.create_co_s(worker_main, {worker})
+            context.resume(worker->co)
+            worker_list.push_back(worker)
+        end
         loop
-            if !ac_lock
-                # Start a new acceptance
-                lock_acceptor()
-                collect_garbage()
-                var worker = gcnew worker_type
-                worker->server = &this
-                worker->co = context.create_co_s(worker_main, {worker})
+            foreach worker in worker_list
                 context.resume(worker->co)
-                worker_list.push_back(worker)
-            else
-                # Sequentially process each coroutine
-                foreach worker in worker_list
-                    if worker->state != 2
-                        context.resume(worker->co)
-                    end
-                end
             end
         end
     end
