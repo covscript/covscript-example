@@ -244,6 +244,7 @@ class http_server
     var ac_lock = false
     var page_404 = null
     var url_map = new hash_map
+    var worker_list = new list
     function initialize()
         url_map.insert("404", [](session, post_data){
             var response_data = "<html><head><meta charset=\"UTF-8\"></head><body><p>404 Not Found: " + session.url + "</p></body></html>"
@@ -282,7 +283,6 @@ class http_server
         ac = tcp.acceptor(tcp.endpoint_v4(port))
     end
     function run()
-        var worker_list = new list
         loop
             if !ac_lock
                 # Start a new acceptance
