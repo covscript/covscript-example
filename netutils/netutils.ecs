@@ -257,6 +257,18 @@ class http_server
         ac_lock = false
         context.yield()
     end
+    function collect_garbage()
+        var it = worker_list.begin
+        while it != worker_list.end
+            link worker = it.data
+            if worker->state == 2
+                context.destroy_co(worker->co)
+                it = worker_list.erase(it)
+            else
+                it.next()
+            end
+        end
+    end
     function bind_page(url, path, state_code)
         var response_data = read_file(path)
         url_map.insert(url, [response_data, state_code](session, post_data){
@@ -275,6 +287,7 @@ class http_server
             if !ac_lock
                 # Start a new acceptance
                 lock_acceptor()
+                collect_garbage()
                 var worker = gcnew worker_type
                 worker->server = &this
                 worker->co = context.create_co_s(worker_main, {worker})
@@ -282,15 +295,9 @@ class http_server
                 worker_list.push_back(worker)
             else
                 # Sequentially process each coroutine
-                var it = worker_list.begin
-                while it != worker_list.end
-                    link worker = it.data
-                    if worker->state == 2
-                        context.destroy_co(worker->co)
-                        it = worker_list.erase(it)
-                    else
+                foreach worker in worker_list
+                    if worker->state != 2
                         context.resume(worker->co)
-                        it.next()
                     end
                 end
             end
