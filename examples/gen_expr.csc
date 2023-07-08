@@ -332,7 +332,7 @@ function run_gen()
                         end
                         continue
                     else
-                        ++op_dist[max_op]
+                        foreach i in range(4) do op_dist[i] += ops[i]
                     end
                 end
                 var val = eval(expr)
