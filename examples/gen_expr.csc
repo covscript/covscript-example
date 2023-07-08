@@ -125,32 +125,30 @@ function print_impl(ofs, flag, expr)
         ofs.print(expr.value)
         return
     end
-    if flag && expr.value < 2
+    if flag
         ofs.print("(")
     end
-    var nxt_flag = expr.value < 2 ? false : true
-    print_impl(ofs, nxt_flag, expr.left)
+    print_impl(ofs, expr.value >= 2 && expr.left.left != null && expr.left.right != null && expr.left.value < 2, expr.left)
+    var nxt_flag = false
     switch expr.value
         case 0
             ofs.print(" + ")
         end
         case 1
             ofs.print(" - ")
-            if expr.right.left != null && expr.right.right != null
-                if expr.right.value == 1
-                    nxt_flag = true
-                end
-            end
+            nxt_flag = expr.right.left != null && expr.right.right != null && expr.right.value == 1
         end
         case 2
             ofs.print(" × ")
+            nxt_flag = expr.right.left != null && expr.right.right != null && expr.right.value < 2
         end
         case 3
             ofs.print(" ÷ ")
+            nxt_flag = true
         end
     end
     print_impl(ofs, nxt_flag, expr.right)
-    if flag && expr.value < 2
+    if flag
         ofs.print(")")
     end
 end
@@ -235,30 +233,62 @@ function check_range(str0, str1)
     end
 end
 
-function check_expr_range(expr, rbeg, rend)
+function check_expr_range(expr, ops, rtype, rbeg, rend)
     if expr.left == null || expr.right == null
         return expr.value
     end
+    ++ops[expr.value]
     var val = 0
     switch expr.value
         case 0
-            val = check_expr_range(expr.left, rbeg, rend) + check_expr_range(expr.right, rbeg, rend)
+            var lhs = check_expr_range(expr.left, ops, rtype, rbeg, rend), rhs = check_expr_range(expr.right, ops, rtype, rbeg, rend)
+            if lhs == rhs || lhs == 0 || rhs == 0
+                throw runtime.exception("FAILED!!!")
+            end
+            val = lhs + rhs
         end
         case 1
-            val = check_expr_range(expr.left, rbeg, rend) - check_expr_range(expr.right, rbeg, rend)
+            var lhs = check_expr_range(expr.left, ops, rtype, rbeg, rend), rhs = check_expr_range(expr.right, ops, rtype, rbeg, rend)
+            if lhs == rhs || lhs == 0 || rhs == 0
+                throw runtime.exception("FAILED!!!")
+            end
+            val = lhs - rhs
         end
         case 2
-            val = check_expr_range(expr.left, rbeg, rend) * check_expr_range(expr.right, rbeg, rend)
+            var lhs = check_expr_range(expr.left, ops, rtype, rbeg, rend), rhs = check_expr_range(expr.right, ops, rtype, rbeg, rend)
+            if lhs == rhs || lhs == 0 || rhs == 0
+                throw runtime.exception("FAILED!!!")
+            end
+            val = lhs * rhs
         end
         case 3
-            val = check_expr_range(expr.left, rbeg, rend) / check_expr_range(expr.right, rbeg, rend)
+            var lhs = check_expr_range(expr.left, ops, rtype, rbeg, rend), rhs = check_expr_range(expr.right, ops, rtype, rbeg, rend)
+            if lhs == rhs || lhs == 0 || rhs == 0
+                throw runtime.exception("FAILED!!!")
+            end
+            val = lhs / rhs
         end
+    end
+    if rtype == 0 && val != 0 && val % 1 != 0
+        throw runtime.exception("FAILED!!!")
     end
     if val >= rbeg && val <= rend
         return val
     else
         throw runtime.exception("FAILED!!!")
     end
+end
+
+function max_element(arr)
+    var max_val = 0
+    var max_idx = -1
+    foreach i in range(arr.size)
+        if arr[i] > max_val
+            max_val = arr[i]
+            max_idx = i
+        end
+    end
+    return max_idx
 end
 
 function run_gen()
@@ -271,24 +301,46 @@ function run_gen()
     opt.output_range = {txt_buffs[2].to_number(), txt_buffs[3].to_number()}
     opt.expr_depth_range = {txt_buffs[4].to_number(), txt_buffs[5].to_number()}
     opt.calculation_error = txt_buffs[7].to_number()
+    var op_dist = {0, 0, 0, 0}
+    var avail_ops = 4
     foreach it in range(4)
         if !chk_values[it]
             opt.excluded_operator.insert(it)
+            --avail_ops
         end
     end
+    if avail_ops == 0
+        return
+    end
+    var size = txt_buffs[6].to_number()
     expr_list = new array
-    foreach it in range(txt_buffs[6].to_number())
+    foreach it in range(size)
         loop
-            var expr = gen(opt)
-            var val = eval(expr)
             try
-                check_expr_range(expr, opt.output_range[0], opt.output_range[1])
+                var expr = gen(opt)
+                var ops = {0, 0, 0, 0}
+                check_expr_range(expr, ops, opt.operand_type, opt.output_range[0], opt.output_range[1])
+                var max_op = max_element(ops)
+                if max_op != -1
+                    if max_op == max_element(op_dist)
+                        if log
+                            system.out.println("Regenerate for op " + max_op)
+                        end
+                        continue
+                    else
+                        ++op_dist[max_op]
+                    end
+                end
+                var val = eval(expr)
                 expr_list.push_back(expr : val)
                 break
             catch e
                 continue
             end
         end
+    end
+    if log
+        system.out.println(op_dist)
     end
 end
 
