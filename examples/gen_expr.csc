@@ -291,6 +291,8 @@ function max_element(arr)
     return max_idx
 end
 
+var progress = 0
+
 function run_gen()
     foreach it in txt_buffs
         if check_format(it) != -1
@@ -315,10 +317,12 @@ function run_gen()
     var size = txt_buffs[6].to_number()
     expr_list = new array
     foreach it in range(size)
+        progress = to_integer((it + 1)/size*100)
         loop
             try
                 var expr = gen(opt)
                 var ops = {0, 0, 0, 0}
+                context.yield()
                 check_expr_range(expr, ops, opt.operand_type, opt.output_range[0], opt.output_range[1])
                 var max_op = max_element(ops)
                 if max_op != -1
@@ -358,9 +362,22 @@ function gen_output(ans)
     output = sstr.get_string()
 end
 
+var running = false
+var co = null
+
+function co_main(have_ans)
+    running = true
+    run_gen()
+    gen_output(have_ans)
+    running = false
+end
+
 loop
     if app.is_closed()
         system.exit(0)
+    end
+    if running
+        context.resume(co)
     end
     app.prepare()
     push_font(font)
@@ -463,7 +480,11 @@ loop
                 end
             end
         end
-        text("输出内容")
+        if running
+            text("正在生成, " + progress + "%...")
+        else
+            text("输出内容")
+        end
         columns(2, "#OUTPUT_AREA", false)
         set_column_width(0, width)
         push_item_width(width)
@@ -471,9 +492,12 @@ loop
         pop_item_width()
         next_column()
         check_box("答案", have_ans)
-        if button("开始生成") && !have_error
-            run_gen()
-            gen_output(have_ans)
+        if button("开始生成") && !have_error && !running
+            if co != null
+                context.destroy_co(co)
+            end
+            co = context.create_co_s(co_main, {have_ans})
+            context.resume(co)
         end
         if button("输出文本")
             gen_output(have_ans)
