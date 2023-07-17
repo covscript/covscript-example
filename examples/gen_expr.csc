@@ -493,9 +493,6 @@ loop
         next_column()
         check_box("答案", have_ans)
         if button("开始生成") && !have_error && !running
-            if co != null
-                context.destroy_co(co)
-            end
             co = context.create_co_s(co_main, {have_ans})
             context.resume(co)
         end
