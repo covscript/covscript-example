@@ -1,4 +1,5 @@
 @charset: utf8
+@require: 210508
 
 namespace node_type
     constant add = 0
@@ -322,7 +323,7 @@ function run_gen()
             try
                 var expr = gen(opt)
                 var ops = {0, 0, 0, 0}
-                context.yield()
+                runtime.yield()
                 check_expr_range(expr, ops, opt.operand_type, opt.output_range[0], opt.output_range[1])
                 var max_op = max_element(ops)
                 if max_op != -1
@@ -377,7 +378,7 @@ loop
         system.exit(0)
     end
     if running
-        context.resume(co)
+        runtime.resume(co)
     end
     app.prepare()
     push_font(font)
@@ -493,8 +494,8 @@ loop
         next_column()
         check_box("答案", have_ans)
         if button("开始生成") && !have_error && !running
-            co = context.create_co_s(co_main, {have_ans})
-            context.resume(co)
+            co = runtime.create_co_s(co_main, {have_ans})
+            runtime.resume(co)
         end
         if button("输出文本")
             gen_output(have_ans)

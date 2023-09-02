@@ -70,7 +70,7 @@ struct db_editor extends picasso.base_window
                 opened=true
                 if begin_popup_modal("Edit Value##popup"+id,opened,{flags.no_move,flags.always_auto_resize})
                     text("Type:"+it.type)
-                    input_text("",text_buff,128)
+                    input_text("##input_txt1",text_buff,128)
                     same_line()
                     if button("Confirm")
                         var stmt=db.prepare("update "+table_name+" set "+it.name+"=? where "+it.name+"=?")
@@ -131,7 +131,7 @@ struct db_editor extends picasso.base_window
         separator()
         foreach it in column_info
             opened=false
-            selectable(it.data,opened)
+            selectable(it.data+"##select"+id,opened)
             if is_item_hovered()&&is_mouse_clicked(0)
                 open_popup("Edit Value##popup"+id)
                 text_buff=it.data
@@ -139,7 +139,7 @@ struct db_editor extends picasso.base_window
             opened=true
             if begin_popup_modal("Edit Value##popup"+id,opened,{flags.no_move,flags.always_auto_resize})
                 text("Type:"+it.type)
-                input_text("",text_buff,128)
+                input_text("##input_txt2",text_buff,128)
                 same_line()
                 if button("Confirm")
                     it.data=text_buff
